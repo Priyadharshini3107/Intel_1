@@ -13,56 +13,59 @@ var createTempTableQuery =
     CREATE OR REPLACE TEMPORARY TABLE TEMP_INVOICE_DETAILS AS
    
         SELECT
-        soh.ORDER_ID,
-        soh.ORDER_DATE,
-        CURRENT_DATE AS INVOICE_DATE,
-        CASE
-            -- Calculate tax amount (9% of the final invoice amount)
-            WHEN p.PROMOTION_TYPE = 'Discount' THEN
-                (soh.TOTAL_AMOUNT * (1 - (p.PROMOTION_VALUE / 100))) * 0.09
-            WHEN p.PROMOTION_TYPE IN ('Coupon_X', 'Coupon_Y', 'Coupon_Z')  THEN
-                ((soh.TOTAL_AMOUNT - p.PROMOTION_VALUE) * 0.09)
-            WHEN p.PROMOTION_TYPE = 'Loyalty' THEN
-                (soh.TOTAL_AMOUNT * 0.09)
-            ELSE
-                (soh.TOTAL_AMOUNT * 0.09) -- No promotion applied
-        END AS TAX_AMOUNT,
-        soh.TOTAL_AMOUNT AS TOTAL_AMOUNT,
-        CASE
-            -- Apply discount based on promotion value for 'Discount' promotions
-            WHEN p.PROMOTION_TYPE = 'Discount' THEN
-                (soh.TOTAL_AMOUNT * (1 - (p.PROMOTION_VALUE / 100)))
-            -- Apply coupon discount if provided and applicable for 'Coupon_X', 'Coupon_Y', and 'Coupon_Z' promotions
-            WHEN p.PROMOTION_TYPE IN ('Coupon_X', 'Coupon_Y', 'Coupon_Z')  THEN
-                (soh.TOTAL_AMOUNT - p.PROMOTION_VALUE)
-            -- For 'Loyalty' promotions, no discount is applied, and the final amount remains unchanged
-            WHEN p.PROMOTION_TYPE = 'Loyalty' THEN
-                soh.TOTAL_AMOUNT
-            ELSE
-                soh.TOTAL_AMOUNT -- No promotion applied
-        END AS DISCOUNT,
-        CASE
-            -- Calculate final invoice amount
-            WHEN p.PROMOTION_TYPE = 'Discount' THEN
-                (soh.TOTAL_AMOUNT * (1 - (p.PROMOTION_VALUE / 100))) + 
-                ((soh.TOTAL_AMOUNT * (1 - (p.PROMOTION_VALUE / 100))) * 0.09)
-            WHEN p.PROMOTION_TYPE IN ('Coupon_X', 'Coupon_Y', 'Coupon_Z')  THEN
-                (soh.TOTAL_AMOUNT - p.PROMOTION_VALUE) + 
-                ((soh.TOTAL_AMOUNT - p.PROMOTION_VALUE) * 0.09)
-            WHEN p.PROMOTION_TYPE = 'Loyalty' THEN
-                soh.TOTAL_AMOUNT + (soh.TOTAL_AMOUNT * 0.09)
-            ELSE
-                soh.TOTAL_AMOUNT + (soh.TOTAL_AMOUNT * 0.09) -- No promotion applied
-        END AS FINAL_INVOICE_AMT,
-    FROM
-        ORDER_BASE.T_SALES_ORDER_HEADER soh
-    JOIN
-        ORDER_BASE.T_CUSTOMER c ON soh.CUSTOMER_ID = c.CUSTOMER_ID
-    LEFT JOIN
-        order_xfrm.V_PROMOTION p ON c.CATEGORY = p.CUSTOMER_CATEGORY
-    WHERE
-        soh.ORDER_DATE > CURRENT_DATE
-        AND c.STATUS = 'Active';
+            soh.ORDER_ID,
+            soh.ORDER_DATE,
+            CURRENT_DATE AS INVOICE_DATE,
+            CASE
+                -- Calculate tax amount (9% of the final invoice amount)
+                WHEN p.PROMOTION_TYPE = 'Discount' AND p.CUSTOMER_CATEGORY = 'Gold' THEN
+                    ROUND((soh.TOTAL_AMOUNT * (1 - (p.PROMOTION_VALUE / 100))) * 0.09, 2)
+                WHEN p.PROMOTION_TYPE IN ('Coupon_X', 'Coupon_Y', 'Coupon_Z') AND p.CUSTOMER_CATEGORY = 'Regular' THEN
+                    ROUND(((soh.TOTAL_AMOUNT - p.PROMOTION_VALUE) * 0.09), 2)
+                WHEN p.PROMOTION_TYPE = 'Loyalty' AND p.CUSTOMER_CATEGORY IN ('Gold', 'Silver', 'Bronze') THEN
+                    ROUND((soh.TOTAL_AMOUNT * 0.09), 2)
+                ELSE
+                    ROUND((soh.TOTAL_AMOUNT * 0.09), 2) -- No promotion applied
+            END AS TAX_AMOUNT,
+            soh.TOTAL_AMOUNT AS TOTAL_AMOUNT,
+            CASE
+                -- Apply discount based on promotion value for 'Discount' promotions
+                WHEN p.PROMOTION_TYPE = 'Discount' AND p.CUSTOMER_CATEGORY IN ('Gold', 'Silver', 'Bronze') THEN
+                    ROUND((soh.TOTAL_AMOUNT * (1 - (p.PROMOTION_VALUE / 100))), 2)
+                -- Apply coupon discount if provided and applicable for 'Coupon_X', 'Coupon_Y', and 'Coupon_Z' promotions
+                WHEN p.PROMOTION_TYPE IN ('Coupon_X', 'Coupon_Y', 'Coupon_Z') AND p.CUSTOMER_CATEGORY = 'Regular' THEN
+                    ROUND((soh.TOTAL_AMOUNT - p.PROMOTION_VALUE), 2)
+                -- For 'Loyalty' promotions, no discount is applied, and the final amount remains unchanged
+                WHEN p.PROMOTION_TYPE = 'Loyalty' AND p.CUSTOMER_CATEGORY IN ('Gold', 'Silver', 'Bronze') THEN
+                    soh.TOTAL_AMOUNT
+                ELSE
+                    soh.TOTAL_AMOUNT -- No promotion applied
+            END AS DISCOUNT,
+            CASE
+                -- Calculate final invoice amount
+                WHEN p.PROMOTION_TYPE = 'Discount' AND p.CUSTOMER_CATEGORY IN ('Gold', 'Silver', 'Bronze') THEN
+                    ROUND(((soh.TOTAL_AMOUNT * (1 - (p.PROMOTION_VALUE / 100))) + 
+                    ((soh.TOTAL_AMOUNT * (1 - (p.PROMOTION_VALUE / 100))) * 0.09)), 2)
+                WHEN p.PROMOTION_TYPE IN ('Coupon_X', 'Coupon_Y', 'Coupon_Z') AND p.CUSTOMER_CATEGORY = 'Regular' THEN
+                    ROUND(((soh.TOTAL_AMOUNT - p.PROMOTION_VALUE) + 
+                    ((soh.TOTAL_AMOUNT - p.PROMOTION_VALUE) * 0.09)), 2)
+                WHEN p.PROMOTION_TYPE = 'Loyalty' AND p.CUSTOMER_CATEGORY IN ('Gold', 'Silver', 'Bronze') THEN
+                    ROUND((soh.TOTAL_AMOUNT + (soh.TOTAL_AMOUNT * 0.09)), 2)
+                ELSE
+                    ROUND((soh.TOTAL_AMOUNT + (soh.TOTAL_AMOUNT * 0.09)), 2) -- No promotion applied
+            END AS FINAL_INVOICE_AMT,
+            soh.CUSTOMER_ID,
+            CURRENT_DATE AS CREATE_DATE,
+            'system' AS CREATE_USER
+        FROM
+            ORDER_BASE.T_SALES_ORDER_HEADER soh
+        JOIN
+            ORDER_BASE.T_CUSTOMER c ON soh.CUSTOMER_ID = c.CUSTOMER_ID
+        LEFT JOIN
+            order_xfrm.V_PROMOTION p ON c.CATEGORY = p.CUSTOMER_CATEGORY
+        WHERE
+            soh.ORDER_DATE > CURRENT_DATE
+            AND c.STATUS = 'Active';
 `;
 
 // Execute the query to create the temporary table
@@ -70,14 +73,48 @@ snowflake.execute({sqlText: createTempTableQuery});
 
 // Create the view V_INVOICE_DETAILS from the temporary table
 var createViewQuery = `
-    CREATE OR REPLACE VIEW V_INVOICE AS
+    CREATE OR REPLACE VIEW V_INVOICE_DETAILS AS
     SELECT * FROM TEMP_INVOICE_DETAILS;
 `;
 
 // Execute the query to create the view
 snowflake.execute({sqlText: createViewQuery});
 
+// Insert into T_INVOICE table
+var insertIntoInvoiceTableQuery = `
+    INSERT INTO ORDER_BASE.T_INVOICE (ORDER_ID, ORDER_DATE, INVOICE_DATE, TAX_AMOUNT, TOTAL_AMOUNT, DISCOUNT, FINAL_INVOICE_AMT, CUSTOMER_ID, CREATE_DATE, CREATE_USER)
+    SELECT  ORDER_ID, ORDER_DATE, INVOICE_DATE, TAX_AMOUNT, TOTAL_AMOUNT, DISCOUNT, FINAL_INVOICE_AMT, CUSTOMER_ID, CREATE_DATE, CREATE_USER FROM TEMP_INVOICE_DETAILS;
+`;
+
+snowflake.execute({sqlText: insertIntoInvoiceTableQuery});
+var updateLoyaltyPointsQuery = `
+    UPDATE ORDER_BASE.T_CUSTOMER AS c
+    SET LOYALTY_POINTS = 
+        CASE
+            WHEN c.CATEGORY = 'Gold' THEN 
+                CASE
+                    WHEN (SELECT SUM(soh.TOTAL_AMOUNT) FROM ORDER_BASE.T_SALES_ORDER_HEADER AS soh WHERE soh.CUSTOMER_ID = c.CUSTOMER_ID) > 1000 THEN c.LOYALTY_POINTS + 100
+                    ELSE c.LOYALTY_POINTS
+                END
+            WHEN c.CATEGORY = 'Silver' THEN 
+                CASE
+                    WHEN (SELECT SUM(soh.TOTAL_AMOUNT) FROM ORDER_BASE.T_SALES_ORDER_HEADER AS soh WHERE soh.CUSTOMER_ID = c.CUSTOMER_ID) > 1000 THEN c.LOYALTY_POINTS + 50
+                    ELSE c.LOYALTY_POINTS
+                END
+            WHEN c.CATEGORY = 'Bronze' THEN 
+                CASE
+                    WHEN (SELECT SUM(soh.TOTAL_AMOUNT) FROM ORDER_BASE.T_SALES_ORDER_HEADER AS soh WHERE soh.CUSTOMER_ID = c.CUSTOMER_ID) > 1000 THEN c.LOYALTY_POINTS + 30
+                    ELSE c.LOYALTY_POINTS
+                END
+            ELSE c.LOYALTY_POINTS
+        END
+    WHERE c.CATEGORY = 'Regular' AND (SELECT SUM(soh.TOTAL_AMOUNT) FROM ORDER_BASE.T_SALES_ORDER_HEADER AS soh WHERE soh.CUSTOMER_ID = c.CUSTOMER_ID) > 1000;
+`;
+
+// Execute the query to update loyalty points
+snowflake.execute({sqlText: updateLoyaltyPointsQuery});
+
 return "Invoices generated successfully.";
 $$;
-CALL ORDER_BASE.P_INVOICE_GENERATE();
-SELECT * FROM V_INVOICE;
+
+
