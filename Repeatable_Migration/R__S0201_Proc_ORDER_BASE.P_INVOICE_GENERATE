@@ -1,0 +1,95 @@
+CREATE OR REPLACE PROCEDURE ORDER_BASE.P_INVOICE_GENERATE()
+RETURNS STRING
+LANGUAGE JAVASCRIPT
+EXECUTE AS CALLER
+AS
+$$
+    var today = new Date();
+    var todayStr = today.toISOString().substring(0, 10);  // Format today's date as YYYY-MM-DD
+
+    // Create temporary table for intermediate invoice details
+    var createTempTableQuery = `
+        CREATE OR REPLACE TEMPORARY TABLE TEMP_INVOICE_DETAILS AS
+        SELECT
+            soh.ORDER_ID,
+            soh.ORDER_DATE,
+            CURRENT_DATE AS INVOICE_DATE,
+            CASE
+                -- Calculate tax amount (9% of the final invoice amount)
+                WHEN p.PROMOTION_TYPE = 'Discount' AND p.CUSTOMER_CATEGORY IN ('Gold', 'Silver', 'Bronze') THEN
+                    ROUND((soh.TOTAL_AMOUNT * (1 - (p.PROMOTION_VALUE / 100))) * 0.09, 2)
+                WHEN p.PROMOTION_TYPE IN ('Coupon_X', 'Coupon_Y', 'Coupon_Z') AND p.CUSTOMER_CATEGORY = 'Regular' THEN
+                    ROUND(((soh.TOTAL_AMOUNT - p.PROMOTION_VALUE) * 0.09), 2)
+                WHEN p.PROMOTION_TYPE = 'Loyalty' AND p.CUSTOMER_CATEGORY IN ('Gold', 'Silver', 'Bronze') THEN
+                    ROUND((soh.TOTAL_AMOUNT * 0.09), 2)
+                ELSE
+                    ROUND((soh.TOTAL_AMOUNT * 0.09), 2) -- No promotion applied
+            END AS TAX_AMOUNT,
+            soh.TOTAL_AMOUNT AS TOTAL_AMOUNT,
+            CASE
+                -- Apply discount based on promotion value for 'Discount' promotions
+                WHEN p.PROMOTION_TYPE = 'Discount' AND p.CUSTOMER_CATEGORY IN ('Gold', 'Silver', 'Bronze') THEN
+                    ROUND((soh.TOTAL_AMOUNT * (1 - (p.PROMOTION_VALUE / 100))), 2)
+                -- Apply coupon discount if provided and applicable for 'Coupon_X', 'Coupon_Y', and 'Coupon_Z' promotions
+                WHEN p.PROMOTION_TYPE IN ('Coupon_X', 'Coupon_Y', 'Coupon_Z') AND p.CUSTOMER_CATEGORY = 'Regular' THEN
+                    ROUND((soh.TOTAL_AMOUNT - p.PROMOTION_VALUE), 2)
+                -- For 'Loyalty' promotions, no discount is applied, and the final amount remains unchanged
+                WHEN p.PROMOTION_TYPE = 'Loyalty' AND p.CUSTOMER_CATEGORY IN ('Gold', 'Silver', 'Bronze') THEN
+                    soh.TOTAL_AMOUNT
+                ELSE
+                    soh.TOTAL_AMOUNT -- No promotion applied
+            END AS DISCOUNT,
+            CASE
+                -- Calculate final invoice amount
+                WHEN p.PROMOTION_TYPE = 'Discount' AND p.CUSTOMER_CATEGORY IN ('Gold', 'Silver', 'Bronze') THEN
+                    ROUND(((soh.TOTAL_AMOUNT * (1 - (p.PROMOTION_VALUE / 100))) + 
+                    ((soh.TOTAL_AMOUNT * (1 - (p.PROMOTION_VALUE / 100))) * 0.09)), 2)
+                WHEN p.PROMOTION_TYPE IN ('Coupon_X', 'Coupon_Y', 'Coupon_Z') AND p.CUSTOMER_CATEGORY = 'Regular' THEN
+                    ROUND(((soh.TOTAL_AMOUNT - p.PROMOTION_VALUE) + 
+                    ((soh.TOTAL_AMOUNT - p.PROMOTION_VALUE) * 0.09)), 2)
+                WHEN p.PROMOTION_TYPE = 'Loyalty' AND p.CUSTOMER_CATEGORY IN ('Gold', 'Silver', 'Bronze') THEN
+                    ROUND((soh.TOTAL_AMOUNT + (soh.TOTAL_AMOUNT * 0.09)), 2)
+                ELSE
+                    ROUND((soh.TOTAL_AMOUNT + (soh.TOTAL_AMOUNT * 0.09)), 2) -- No promotion applied
+            END AS FINAL_INVOICE_AMT,
+            soh.CUSTOMER_ID,
+            CURRENT_DATE AS CREATE_DATE,
+            'system' AS CREATE_USER
+        FROM
+            ORDER_BASE.T_SALES_ORDER_HEADER soh
+        JOIN
+            ORDER_BASE.T_CUSTOMER c ON soh.CUSTOMER_ID = c.CUSTOMER_ID
+        JOIN
+            order_xfrm.V_PROMOTION p ON c.CUSTOMER_ID = p.CUSTOMER_ID
+        WHERE
+            soh.ORDER_DATE > CURRENT_DATE
+            AND c.STATUS = 'Active';
+    `;
+
+    // Execute the query to create the temporary table
+    snowflake.execute({sqlText: createTempTableQuery});
+
+    // Insert into T_INVOICE table
+    var insertIntoInvoiceTableQuery = `
+        INSERT INTO ORDER_BASE.T_INVOICE (ORDER_ID, CUSTOMER_ID, ORDER_DATE, INVOICE_DATE, TOTAL_AMOUNT, DISCOUNT, TAX_AMOUNT, FINAL_INVOICE_AMT, CREATE_DATE, CREATE_USER)
+        SELECT
+            ORDER_ID,
+            CUSTOMER_ID,
+            ORDER_DATE,
+            INVOICE_DATE,
+            TOTAL_AMOUNT,
+            DISCOUNT,
+            TAX_AMOUNT,
+            FINAL_INVOICE_AMT,
+            CREATE_DATE,
+            CREATE_USER
+        FROM
+            TEMP_INVOICE_DETAILS;
+    `;
+
+    // Execute the query to insert into T_INVOICE table
+    snowflake.execute({sqlText: insertIntoInvoiceTableQuery});
+
+    return "Invoices generated successfully.";
+$$;
+CALL ORDER_BASE.P_INVOICE_GENERATE();
