@@ -1,0 +1,20 @@
+CREATE OR REPLACE VIEW BMATHUB_XFRM.V_COMPRESS_BOM_CORE
+AS
+    SELECT
+        ic.INPUT_ITEM_ID AS ITEM,
+        ic.ITEM_CLASS_NM,
+        sort_items.INPUT_ITEM_ID AS ANCHOR_ITEM_ID,
+        ic.BOM_NUM,
+        ic.LOCATION AS LOC,
+        CURRENT_DATE AS CREATE_DATE,
+        'SYSTEM' AS CREATE_USER
+    FROM
+        BMATHUB_BASE.T_COMPRESS_BOM_CORE ic
+    JOIN
+        BMATHUB_BASE.T_COMPRESS_BOM_CORE prep_items
+        ON ic.INPUT_ITEM_ID = prep_items.OUTPUT_ITEM_ID
+    JOIN
+        BMATHUB_BASE.T_COMPRESS_BOM_CORE sort_items
+        ON prep_items.INPUT_ITEM_ID = sort_items.OUTPUT_ITEM_ID
+    WHERE
+        ic.ITEM_CLASS_NM = 'IC'
